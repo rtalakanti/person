@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<xs:schema attributeFormDefault="unqualified"
+	elementFormDefault="qualified"
+	targetNamespace="http://adelaide.edu.au/integration/app/PersonDataResponse"
+	xmlns:xs="http://www.w3.org/2001/XMLSchema">
+	<xs:element name="PersonResponse">
+		<xs:complexType>
+			<xs:sequence>
+				<xs:element name="Person">
+					<xs:complexType>
+						<xs:sequence>
+							<xs:element name="PersonID" type="xs:string" />
+							<xs:element name="FullName" type="xs:string" />
+							<xs:element name="FirstName" type="xs:string" />
+							<xs:element name="LastName" type="xs:string" />
+							<xs:element name="MiddleName" type="xs:string" />
+							<xs:element name="PreferredName" type="xs:string" />
+							<xs:element name="DateOfBirth" type="xs:date" />
+							<xs:element name="Gender" type="xs:string" />
+							<xs:element name="NameTitle" type="xs:string" />
+							<xs:element name="ResidencyStatus" type="xs:string" />
+							<xs:element name="PersonType" type="xs:string" />
+							<xs:element maxOccurs="unbounded" name="Address">
+								<xs:complexType>
+									<xs:sequence>
+										<xs:element name="AddressType" type="xs:string" />
+										<xs:element name="Address1" type="xs:string" />
+										<xs:element name="Address2" type="xs:string" />
+										<xs:element name="City" type="xs:string" />
+										<xs:element name="State" type="xs:string" />
+										<xs:element name="Country" type="xs:string" />
+										<xs:element name="PostCode" type="xs:string" />
+									</xs:sequence>
+								</xs:complexType>
+							</xs:element>
+							<xs:element name="Contact">
+								<xs:complexType>
+									<xs:sequence>
+										<xs:element maxOccurs="unbounded" name="Phone">
+											<xs:complexType>
+												<xs:sequence>
+													<xs:element name="PhoneType" type="xs:string" />
+													<xs:element name="PhoneNo" type="xs:string" />
+													<xs:element name="IsPreferred" type="xs:string" />
+												</xs:sequence>
+											</xs:complexType>
+										</xs:element>
+										<xs:element maxOccurs="unbounded" name="Email">
+											<xs:complexType>
+												<xs:sequence>
+													<xs:element name="EmailType" type="xs:string" />
+													<xs:element name="EmailAddr" type="xs:string"/>
+													<xs:element name="IsPreferred" type="xs:string" />
+												</xs:sequence>
+											</xs:complexType>
+										</xs:element>
+									</xs:sequence>
+								</xs:complexType>
+							</xs:element>
+							<xs:element name="Organization">
+								<xs:complexType>
+									<xs:sequence>
+										<xs:element name="OrganizationName"	type="xs:string" />
+										<xs:element name="Department" type="xs:string" />
+										<xs:element name="Faculty" type="xs:string" />
+										<xs:element name="School" type="xs:string" />
+									</xs:sequence>
+								</xs:complexType>
+							</xs:element>
+						</xs:sequence>
+					</xs:complexType>
+				</xs:element>
+			</xs:sequence>
+		</xs:complexType>
+	</xs:element>
+</xs:schema>

@@ -1,0 +1,137 @@
+{
+	"info": {
+		"_postman_id": "3c0ec1cc-137d-4783-8854-1f2bdd19e830",
+		"name": "person.details Mandatory",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "REST Success12",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"id": "04095e9e-2f9d-4084-8852-01834dfb9e28",
+						"exec": [
+							"pm.test(\"Status code is 200\", function () {",
+							"    pm.response.to.have.status(200);",
+							"});",
+							"",
+							"var jsonData = xml2Json(responseBody);",
+							"    ",
+							"pm.test(\"Person exists\", function () {",
+							"    pm.expect(jsonData['PersonResponse']['Person']).to.be.not.empty;",
+							"    pm.expect(jsonData['PersonResponse']['Person']['Address']).to.be.not.empty;",
+							"    pm.expect(jsonData['PersonResponse']['Person']['Contact']).to.be.not.empty;",
+							"    /*pm.expect(jsonData['PersonResponse']['Person']['Organization']).to.be.not.empty;*/",
+							"});",
+							""
+						],
+						"type": "text/javascript"
+					}
+				},
+				{
+					"listen": "prerequest",
+					"script": {
+						"id": "db7b2c8a-99bd-4b6a-822b-bad8f7c19934",
+						"exec": [
+							"var body = \"grant_type=client_credentials&scope=openid&client_id=\" + pm.variables.get(\"CLIENT_ID\") +  \"&client_secret=\" + pm.variables.get(\"CLIENT_SECRET\")\r",
+							"\r",
+							"pm.sendRequest({\r",
+							"      url:  pm.variables.get(\"AUTH_URL\"), \r",
+							"      method: 'POST',\r",
+							"      header: {\r",
+							"        'Accept': 'application/json',\r",
+							"        'Content-Type': 'application/x-www-form-urlencoded'\r",
+							"      },body: body\r",
+							"      \r",
+							"  }, function (err, res) {\r",
+							"        pm.environment.set(\"ACCESS_TOKEN\", res.json().access_token);\r",
+							"  });"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"auth": {
+					"type": "bearer",
+					"bearer": [
+						{
+							"key": "token",
+							"value": "{{ACCESS_TOKEN}}",
+							"type": "string"
+						}
+					]
+				},
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"name": "Content-Type",
+						"value": "application/xml",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": " <PersonRequest  xmlns=\"http://adelaide.edu.au/integration/app/PersonDataRequest\">\r\n\t<PersonID>a1600107</PersonID>\r\n</PersonRequest>"
+				},
+				"url": {
+					"raw": "http://{{HOST}}:{{PORT}}/api/person-details/v1/",
+					"protocol": "http",
+					"host": [
+						"{{HOST}}"
+					],
+					"port": "{{PORT}}",
+					"path": [
+						"api",
+						"person-details",
+						"v1",
+						""
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "health",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"id": "a43a6bc6-fe54-4c7e-bd83-587504e509f8",
+						"exec": [
+							"pm.test(\"Status code is 200\", function () {",
+							"    pm.response.to.have.status(200);",
+							"});",
+							"var jsonData = pm.response.json();",
+							"pm.test(\"Check overall status is UP\", function () {",
+							"    pm.expect(jsonData.status).to.equal(\"UP\");",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "http://{{HOST}}:{{PORT}}/actuator/health",
+					"protocol": "http",
+					"host": [
+						"{{HOST}}"
+					],
+					"port": "{{PORT}}",
+					"path": [
+						"actuator",
+						"health"
+					]
+				}
+			},
+			"response": []
+		}
+	],
+	"protocolProfileBehavior": {}
+}

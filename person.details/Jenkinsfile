@@ -1,0 +1,662 @@
+//Application related variables
+def ARTIFACT_NAME
+def ARTIFACT_VERSION
+def TAG_NAME
+def APP_MAJOR_VERSION
+def COMMIT_HASH
+
+def UoA_INTEGRATION_APP_UNIQUE_NAME
+def UoA_INTEGRATION_APP_VERSIONED_NAME
+def CONVERTED_APP_VERSION
+
+//3scale and RH SSO related variables
+def THREE_SCALE_CREDENTIAL
+def THREE_SCALE_API_SERVICE_SYSTEM_NAME
+def THREE_SCALE_CLUSTER
+def THREE_SCALE_ADMIN_URL
+def THREE_SCALE_NAMESPACE
+def THREE_SCALE_ADMIN_SECRET_NAME
+def THREE_SCALE_ACCESS_TOKEN_NAME
+def DEFAULT_DEVELOPER_ACCT_ID
+def APP_PLAN_SUFFIX
+def APP_SUFFIX
+def PIPELINE_CLIENT_SUFFIX
+def APICAST_STAGING_ROUTE
+def APICAST_PROD_ROUTE
+def APICAST_STAGING_SERVICE
+def APICAST_PROD_SERVICE
+def POSTMAN_CLIENT_SUFFIX
+def TOOLBOX_CONFIG_MAP
+def TOOLBOX_JOB_NAME
+
+//Openshift related VARIABLES
+def OPENSHIFT_PRD_URL
+def OPENSHIFT_DEV_URL
+
+def OPENSHIFT_PRD_CREDENTIAL_NAME
+def OPENSHIFT_DEV_CREDENTIAL_NAME
+
+pipeline{
+    agent {
+        label 'maven'
+    }
+    stages{
+        stage('Checkout from GitLab') {
+            steps {
+                dir("${workspace}/projectRepo") {
+                    script {
+                        def scmVars = checkout ( [$class: 'GitSCM',
+                                                  branches: [[name: "${APPLICATION_GIT_BRANCH}" ]],
+                                                  userRemoteConfigs: [[
+                                                                              credentialsId:  "${JENKINS_NAMESPACE}-${JENKINS_SOURCE_SECRET}",
+                                                                              url: "${APPLICATION_GIT_URI}"]]])
+
+                        echo "env.APPLICATION_GIT_URI ${env.APPLICATION_GIT_URI}"
+                        def GIT_URI = "${env.APPLICATION_GIT_URI}"
+                        echo "VARIABLE GIT_URI = ${GIT_URI}"
+
+                        def PROJECT_NAME = getProjectName(GIT_URI)
+
+                        UoA_INTEGRATION_APP_UNIQUE_NAME = PROJECT_NAME
+
+                        ARTIFACT_NAME = readMavenPom().getArtifactId()
+                        ARTIFACT_VERSION = readMavenPom().getVersion()
+
+                        if (PROJECT_NAME == null || PROJECT_NAME.length() < 0){
+                            echo "Invalid project name. ${PROJECT_NAME}"
+                            error('Aborting the pipeline execution.')
+                        }
+
+                        UoA_INTEGRATION_APP_UNIQUE_NAME = PROJECT_NAME.replace(".","-").toLowerCase()
+                        CONVERTED_APP_VERSION = ARTIFACT_VERSION.replace(".","-").toLowerCase()
+                        TAG_NAME = "v"+ CONVERTED_APP_VERSION
+                        UoA_INTEGRATION_APP_VERSIONED_NAME = UoA_INTEGRATION_APP_UNIQUE_NAME + "-" + TAG_NAME
+                        APP_MAJOR_VERSION = getMajorVersion(ARTIFACT_VERSION)
+                        COMMIT_HASH = scmVars.GIT_COMMIT.substring(0,8)
+
+                        echo "************************"
+                        echo "env.ENVT = ${env.ENVT}"
+                        echo "PROJECT_NAME =" + PROJECT_NAME
+                        echo "UoA_INTEGRATION_APP_UNIQUE_NAME = " + UoA_INTEGRATION_APP_UNIQUE_NAME
+                        echo "CONVERTED_APP_VERSION = " + CONVERTED_APP_VERSION
+                        echo "TAG_NAME = " + TAG_NAME
+                        echo "UoA_INTEGRATION_APP_VERSIONED_NAME = " + UoA_INTEGRATION_APP_VERSIONED_NAME
+                        echo "APP_MAJOR_VERSION = " + APP_MAJOR_VERSION
+                        echo "COMMIT_HASH = " + COMMIT_HASH
+                        echo "APPLICATION_NAMESPACE = " + APPLICATION_NAMESPACE
+                        echo "************************"
+
+                    }
+                }
+            }
+        }
+
+        stage('Build fat jar') {
+            when{
+                expression{
+                    env.ENVT == 'dev'
+                }
+            }
+            steps {
+                dir("${workspace}/projectRepo") {
+                    echo "Executing maven commands..."
+                    sh "mvn -Djar.finalName=${ARTIFACT_NAME}-${ARTIFACT_VERSION} clean package"
+                }
+            }
+        }
+
+        stage('Get build templates'){
+            when{
+                expression{
+                    env.ENVT == 'dev'
+                }
+            }
+            steps{
+                script{
+                    echo "Getting build templates"
+                    dir("${workspace}/buildTemplate") {
+                        git     branch: "master",
+                                credentialsId: "${JENKINS_NAMESPACE}-${JENKINS_SOURCE_SECRET}",
+                                url: "git@gitlab.adelaide.edu.au:integration/openshift/build-pipeline-template.git"
+                    }
+                }
+            }
+        }
+
+        stage('Create objects'){
+            when{
+                expression{
+                    env.ENVT == 'dev'
+                }
+            }
+            steps{
+                dir("${workspace}/buildTemplate"){
+                    sh """
+
+                    oc project ${APPLICATION_NAMESPACE}
+
+                    echo "Process build and imagestream template."
+                    oc process -f ${workspace}/buildTemplate/uoa-integration-build-template.yaml -n ${APPLICATION_NAMESPACE} -p UOA_INTEGRATION_APP_UNIQUE_NAME=${UoA_INTEGRATION_APP_UNIQUE_NAME} -p UOA_INTEGRATION_APP_VERSIONED_NAME=${UoA_INTEGRATION_APP_VERSIONED_NAME} -p APP_NAMESPACE=${APPLICATION_NAMESPACE}  -p JENKINS_BUILD_NUMBER=${BUILD_NUMBER}  -p VERSION=${ARTIFACT_VERSION} -p TAG_NAME=${TAG_NAME} -p COMMIT_HASH=${COMMIT_HASH} | oc apply -n ${APPLICATION_NAMESPACE} -f -
+                    oc process -f ${workspace}/buildTemplate/uoa-integration-imagestream-template.yaml -n ${APPLICATION_NAMESPACE} -p IMAGESTREAM_NAME=${UoA_INTEGRATION_APP_UNIQUE_NAME} -p APP_NAMESPACE=${APPLICATION_NAMESPACE} -p JENKINS_BUILD_NUMBER=${BUILD_NUMBER}  | oc apply -n ${APPLICATION_NAMESPACE} -f -
+
+                    """
+                }
+            }
+        }
+
+        stage('Start Build'){
+            when{
+                expression{
+                    env.ENVT == 'dev'
+                }
+            }
+            steps{
+                dir("${workspace}/projectRepo"){
+                    sh """
+                    echo Start Build
+                    rm -rf oc-build && mkdir -p oc-build/deployments
+                    cp target/${ARTIFACT_NAME}-${ARTIFACT_VERSION}.jar oc-build/deployments/${ARTIFACT_NAME}-${ARTIFACT_VERSION}.jar
+                    oc project ${APPLICATION_NAMESPACE}
+                    oc start-build ${UoA_INTEGRATION_APP_VERSIONED_NAME} -n ${APPLICATION_NAMESPACE} --from-dir=./oc-build  --follow
+                    """
+                }
+            }
+        }
+
+        stage('Load environment config'){
+            steps{
+                script{
+
+                    sh """
+                        oc extract configmap/${env.ENVT}-pipeline-config -n ${JENKINS_NAMESPACE} --confirm
+                        cat ${env.ENVT}-pipeline-config.properties
+                    """
+
+                    CONFIG_FILE = env.ENVT + '-pipeline-config.properties'
+                    props = readProperties file: CONFIG_FILE
+
+                    OPENSHIFT_PRD_URL = "${props['openshift.prd.url']}"
+                    OPENSHIFT_PRD_CREDENTIAL_NAME = "${props['openshift.prd.token.credential.name']}"
+
+                    OPENSHIFT_DEV_URL = "${props['openshift.dev.url']}"
+                    OPENSHIFT_DEV_CREDENTIAL_NAME = "${props['openshift.dev.token.credential.name']}"
+
+                    THREE_SCALE_NAMESPACE = "${props['threescale.namespace']}"
+                    THREE_SCALE_CREDENTIAL = "${props['threescale.credential']}"
+                    DEFAULT_DEVELOPER_ACCT_ID = "${props['threescale.default.developer.acct.id']}"
+                    THREE_SCALE_CLUSTER = "${props['threescale.cluster']}"
+                    THREE_SCALE_ADMIN_URL = "${props['threescale.admin.url']}"
+                    APP_PLAN_SUFFIX = "${props['threescale.app.plan.suffix']}"
+                    APP_SUFFIX = "${props['threescale.app.suffix']}"
+                    PIPELINE_CLIENT_SUFFIX = "${props['threescale.pipeline.client.suffix']}"
+                    POSTMAN_CLIENT_SUFFIX = "${props['threescale.postman.client.suffix']}"
+                    APICAST_STAGING_ROUTE = "${props['threescale.apicast.staging.route']}"
+                    APICAST_PROD_ROUTE = "${props['threescale.apicast.prod.route']}"
+                    THREE_SCALE_URL = "${props['threescale.url']}"
+                    THREE_SCALE_ADMIN_SECRET_NAME = "${props['threescale.admin.secret.name']}"
+                    THREE_SCALE_ACCESS_TOKEN_NAME = "${props['threescale.access.token.name']}"
+                    APICAST_STAGING_SERVICE = "${props['threescale.apicast.staging.service']}"
+                    APICAST_PROD_SERVICE = "${props['threescale.apicast.prod.service']}"
+                    RH_SSO_AUTH_TOKEN_PATH = "${props['rh.sso.auth.token.path']}"
+                    RH_SSO_AUTH_REALM_PATH = "${props['rh.sso.auth.realm.path']}"
+
+                    echo "************************"
+                    echo "OPENSHIFT_PRD_URL ${OPENSHIFT_PRD_URL}"
+                    echo "OPENSHIFT_PRD_CREDENTIAL_NAME ${OPENSHIFT_PRD_CREDENTIAL_NAME}"
+                    echo "OPENSHIFT_DEV_URL ${OPENSHIFT_DEV_URL}"
+                    echo "OPENSHIFT_DEV_CREDENTIAL_NAME ${OPENSHIFT_DEV_CREDENTIAL_NAME}"
+
+                    echo "THREE_SCALE_NAMESPACE =" + THREE_SCALE_NAMESPACE
+                    echo "THREE_SCALE_CREDENTIAL = " + THREE_SCALE_CREDENTIAL
+                    echo "DEFAULT_DEVELOPER_ACCT_ID = " + DEFAULT_DEVELOPER_ACCT_ID
+                    echo "THREE_SCALE_CLUSTER = " + THREE_SCALE_CLUSTER
+                    echo "THREE_SCALE_ADMIN_URL = " + THREE_SCALE_ADMIN_URL
+                    echo "APP_PLAN_SUFFIX = " + APP_PLAN_SUFFIX
+                    echo "APP_SUFFIX = " + APP_SUFFIX
+
+                    echo "PIPELINE_CLIENT_SUFFIX = " + PIPELINE_CLIENT_SUFFIX
+                    echo "POSTMAN_CLIENT_SUFFIX = " + POSTMAN_CLIENT_SUFFIX
+                    echo "APICAST_STAGING_ROUTE = " + APICAST_STAGING_ROUTE
+                    echo "APICAST_PROD_ROUTE = " + APICAST_PROD_ROUTE
+                    echo "APICAST_STAGING_SERVICE = " + APICAST_STAGING_SERVICE
+                    echo "APICAST_PROD_SERVICE = " + APICAST_PROD_SERVICE
+                    echo "THREE_SCALE_URL = " + THREE_SCALE_URL
+                    echo "THREE_SCALE_ADMIN_SECRET_NAME = " + THREE_SCALE_ADMIN_SECRET_NAME
+                    echo "THREE_SCALE_ACCESS_TOKEN_NAME = " + THREE_SCALE_ACCESS_TOKEN_NAME
+                    echo "************************"
+
+                }
+            }
+        }
+
+        stage('Check environment'){
+            environment{
+                OPENSHIFT_PRD_CREDENTIAL = credentials("${OPENSHIFT_PRD_CREDENTIAL_NAME}")
+            }
+            when{
+                expression{
+                    env.ENVT != 'dev'
+                }
+            }
+            steps{
+                script{
+                    echo "Logging in to OpenShift cluster ${OPENSHIFT_PRD_URL} project ${APPLICATION_NAMESPACE}"
+
+                    sh """
+                        oc login ${OPENSHIFT_PRD_URL} --token=${OPENSHIFT_PRD_CREDENTIAL}
+                        oc project ${APPLICATION_NAMESPACE}
+                    """
+                }
+            }
+        }
+
+        stage('Configure configmaps'){
+            steps{
+                script{
+                    echo "Configuring configmap for deployment to ${env.ENVT} , in the namespace ${APPLICATION_NAMESPACE}."
+                    dir("${workspace}/projectRepo"){
+                        sh """
+                            # to make sure this shell script will not exit on the first error
+                            set +e
+                            oc project ${APPLICATION_NAMESPACE}
+
+                            CONFIG_MAP_STATUS=\$(oc get configmap ${UoA_INTEGRATION_APP_VERSIONED_NAME}-default -o 'jsonpath={.metadata.name}')
+
+                            if [[ \${CONFIG_MAP_STATUS} != ${UoA_INTEGRATION_APP_VERSIONED_NAME}-default ]]; then
+                                echo "Default ConfigMap doesn\'t exists. Creating ConfigMap."
+                                oc create configmap ${UoA_INTEGRATION_APP_VERSIONED_NAME}-default --from-file=./src/main/resources/application.properties
+                            else
+                                oc create configmap ${UoA_INTEGRATION_APP_VERSIONED_NAME}-default --from-file=./src/main/resources/application.properties --dry-run -o yaml | oc replace configmap  ${UoA_INTEGRATION_APP_VERSIONED_NAME}-default -f -
+                            fi
+
+                            CONFIG_MAP_STATUS=\$(oc get configmap ${UoA_INTEGRATION_APP_VERSIONED_NAME}-${env.ENVT} -o 'jsonpath={.metadata.name}')
+                            if [[ \${CONFIG_MAP_STATUS} != ${UoA_INTEGRATION_APP_VERSIONED_NAME}-${env.ENVT} ]]; then
+                                echo "${env.ENVT} ConfigMap doesn't exists. Creating dev ConfigMap."
+                                oc create configmap ${UoA_INTEGRATION_APP_VERSIONED_NAME}-${env.ENVT} --from-file=./src/main/resources/application-${env.ENVT}.properties
+                            else
+                                oc create configmap ${UoA_INTEGRATION_APP_VERSIONED_NAME}-${env.ENVT} --from-file=./src/main/resources/application-${env.ENVT}.properties --dry-run -o yaml | oc replace configmap  ${UoA_INTEGRATION_APP_VERSIONED_NAME}-${env.ENVT} -f -
+                            fi
+
+                            # after this line the shell script will exit on the first error
+                            set -e
+
+                          """
+                    }
+                }
+            }
+        }
+
+        stage('Get deploy templates'){
+            steps{
+                script{
+                    echo "Getting deploy templates"
+                    dir("${workspace}/deployTemplate") {
+                        if (fileExists("${workspace}/projectRepo/conf/deployment/uoa-integration-deploy-template.yaml")) {
+                            sh """
+                                echo "Found custom template in project repository"
+                                echo "Copying custom template to deployTemplate directory"
+                                cp ${workspace}/projectRepo/conf/deployment/uoa-integration-deploy-template.yaml ${workspace}/deployTemplate
+                            """
+                        } else {
+                            git branch: "master",
+                                    credentialsId: "${JENKINS_NAMESPACE}-${JENKINS_SOURCE_SECRET}",
+                                    url: "git@gitlab.adelaide.edu.au:integration/openshift/deploy-pipeline-template.git"
+                        }
+                    }
+                }
+            }
+        }
+        stage('Tag Image'){
+            when{
+                expression{
+                    ENVT == 'dev'
+                }
+            }
+            steps{
+                script{
+                    sh """
+                        oc project ${APPLICATION_NAMESPACE}
+                        echo Tagging ${UoA_INTEGRATION_APP_UNIQUE_NAME}:latest to ${UoA_INTEGRATION_APP_UNIQUE_NAME}:${TAG_NAME}
+                        oc tag ${UoA_INTEGRATION_APP_UNIQUE_NAME}:latest ${UoA_INTEGRATION_APP_UNIQUE_NAME}:${TAG_NAME}
+                    """
+                }
+            }
+        }
+
+        stage('Deploy application to namespace'){
+            steps{
+                script{
+                    sh """
+                        oc project ${APPLICATION_NAMESPACE}
+
+                        echo "Process the deployment template and then apply it to the namespace. "
+
+                        oc process -f ${workspace}/deployTemplate/uoa-integration-deploy-template.yaml -n ${APPLICATION_NAMESPACE} \
+                          -p UOA_INTEGRATION_APP_VERSIONED_NAME=${UoA_INTEGRATION_APP_VERSIONED_NAME} -p VERSION=${ARTIFACT_VERSION} \
+                          -p APP_NAMESPACE=${APPLICATION_NAMESPACE} -p EXTERNAL_NAMESPACE=${APPLICATION_NAMESPACE} \
+                          -p IMAGESTREAM_NAME=${UoA_INTEGRATION_APP_UNIQUE_NAME} -p IMAGE_TAG=${TAG_NAME} \
+                          -p ENVIRONMENT_ID=${env.ENVT} -p NUMBER_OF_REPLICAS=1 -p JENKINS_BUILD_NUMBER=$BUILD_NUMBER \
+                          -p UOA_INTEGRATION_APP_UNIQUE_NAME=${UoA_INTEGRATION_APP_UNIQUE_NAME}  | oc apply -n ${APPLICATION_NAMESPACE} -f -
+
+                        #Deploy
+                        oc rollout status dc/${UoA_INTEGRATION_APP_VERSIONED_NAME} -n ${APPLICATION_NAMESPACE} --v=8
+                    """
+                }
+            }
+        }
+
+        stage('Integration test') {
+            agent {
+                label 'nodejs'
+            }
+            environment{
+                OPENSHIFT_PRD_CREDENTIAL = credentials("${OPENSHIFT_PRD_CREDENTIAL_NAME}")
+            }
+            steps {
+                script {
+                    if (env.ENVT != 'dev') {
+                        echo "Logging in to OpenShift cluster ${OPENSHIFT_PRD_URL} project ${APPLICATION_NAMESPACE}"
+                        sh """
+                        oc login ${OPENSHIFT_PRD_URL} --token=${OPENSHIFT_PRD_CREDENTIAL}
+                        oc project ${APPLICATION_NAMESPACE}
+                        """
+                    }
+                }
+
+                dir("${workspace}/projectRepo") {
+                    script {
+                        def scmVars = checkout([$class           : 'GitSCM',
+                                                branches         : [[name: "${APPLICATION_GIT_BRANCH}"]],
+                                                userRemoteConfigs: [[credentialsId: "${JENKINS_NAMESPACE}-${JENKINS_SOURCE_SECRET}",
+                                                                     url          : "${APPLICATION_GIT_URI}"]]])
+
+                        def CLIENT_ID="${UoA_INTEGRATION_APP_UNIQUE_NAME}" + "-v" + "${APP_MAJOR_VERSION}" + "-" + "${POSTMAN_CLIENT_SUFFIX}"
+                        def SECRET_KEY=CLIENT_ID.replaceAll("-","_").toUpperCase()
+
+                        AUTH_SERVER=sh(returnStdout: true, script: "oc get configmap uoa-common-configuration -n ${APPLICATION_NAMESPACE}  -o go-template='{{index .data \"auth.server\"}}'").trim()
+                        println ("Values of new oAuth: ${AUTH_SERVER}${RH_SSO_AUTH_REALM_PATH}${RH_SSO_AUTH_TOKEN_PATH}")
+
+
+                        sh """
+                        npm install -g newman@4.6.1
+
+                        
+                        set +e
+                        if [ "$env.ENVT" = "dev" ];then
+                            HOST=\$(oc get svc ${UoA_INTEGRATION_APP_VERSIONED_NAME} -n ${APPLICATION_NAMESPACE} -o 'jsonpath={.metadata.name}.{.metadata.namespace}.svc.cluster.local')
+                            PORT=\$(oc get svc ${UoA_INTEGRATION_APP_VERSIONED_NAME} -n ${APPLICATION_NAMESPACE} -o 'jsonpath={.spec.ports[*].port}')
+                        else
+                            oc expose service ${UoA_INTEGRATION_APP_VERSIONED_NAME} --name  ${UoA_INTEGRATION_APP_VERSIONED_NAME} -n ${APPLICATION_NAMESPACE}
+                            HOST=\$(oc get route ${UoA_INTEGRATION_APP_VERSIONED_NAME} -n ${APPLICATION_NAMESPACE} -o 'jsonpath={.spec.host}')
+                            PORT=80
+                        fi;
+
+                        
+                        set -e
+
+                        SECRET=\$(oc get secret ${UoA_INTEGRATION_APP_UNIQUE_NAME}-v${APP_MAJOR_VERSION}-${POSTMAN_CLIENT_SUFFIX} -n ${APPLICATION_NAMESPACE} -o go-template='{{.data.${SECRET_KEY}}}' | base64 -d )
+
+                        sed -i "s/{{HOST}}/\${HOST}/g" "src/test/postman/openshift_environment.json"
+                        sed -i "s/{{PORT}}/\${PORT}/g" "src/test/postman/openshift_environment.json"
+                        sed -i "s/{{CLIENT_SECRET}}/\${SECRET}/g" "src/test/postman/openshift_environment.json"
+                        sed -i "s/{{CLIENT_ID}}/${CLIENT_ID}/g" "src/test/postman/openshift_environment.json"
+                        sed -i "s|{{AUTH_URL}}|${AUTH_SERVER}${RH_SSO_AUTH_REALM_PATH}${RH_SSO_AUTH_TOKEN_PATH}|g" "src/test/postman/openshift_environment.json"
+
+                        cat src/test/postman/openshift_environment.json
+
+                        newman run "src/test/postman/${ARTIFACT_NAME}.postman_collection.json" -e src/test/postman/openshift_environment.json --verbose --disable-unicode --reporters cli,junit --reporter-junit-export 'newman/report.xml'
+
+                        FILE="src/test/postman/${ARTIFACT_NAME}.postman_collection-${env.ENVT}.json"
+                        if [ -f \$FILE ]; then
+                            echo "Postman collection for ${env.ENVT} exists. Execute newman test."
+                            newman run "src/test/postman/${ARTIFACT_NAME}.postman_collection-${env.ENVT}.json" -e src/test/postman/openshift_environment.json --verbose --disable-unicode --reporters cli,junit --reporter-junit-export 'newman/report.xml'
+                        else
+                            echo "File does not exist. No ${env.ENVT} newman test to execute."
+                        fi
+
+                    """
+                        junit 'newman/report.xml'
+                    }
+                }
+            }
+        }
+
+        stage('Manipulate swagger.json'){
+            steps{
+                script{
+                    echo "Manipulating swagger."
+                    sh """
+                        SECURITY=,\\"security\\":[{\\"oauth\\":[]}]}
+                        echo "swagger.json before edit"
+                        cd ./src/main/resources/swagger
+                        cat swagger.json
+                        sed -i  "\$ s/}\$/\$SECURITY/" swagger.json
+                        echo "**************************************"
+                        echo "swagger.json after edit"
+                        cat swagger.json
+                    """
+                }
+            }
+        }
+
+        stage('Initialize variable for Toolbox'){
+            steps{
+                script{
+                    echo "Initialize variable for Toolbox."
+                    TOOLBOX_CONFIG_MAP = "${UoA_INTEGRATION_APP_UNIQUE_NAME}-swagger-v${CONVERTED_APP_VERSION}"
+                    TOOLBOX_JOB_NAME = "${UoA_INTEGRATION_APP_UNIQUE_NAME}-toolbox-v${CONVERTED_APP_VERSION}"
+                    THREE_SCALE_API_SERVICE_SYSTEM_NAME = "${UoA_INTEGRATION_APP_UNIQUE_NAME}-v${APP_MAJOR_VERSION}"
+                }
+            }
+        }
+
+        stage('Create config map for swagger.json'){
+            steps{
+                script{
+
+                    sh """
+                    
+                    oc project ${APPLICATION_NAMESPACE}
+                    oc delete configmap ${TOOLBOX_CONFIG_MAP} --ignore-not-found
+                    oc create configmap ${TOOLBOX_CONFIG_MAP} --from-file="./src/main/resources/swagger/swagger.json"
+                    
+                    """
+                }
+            }
+        }
+
+        stage('Create apicast routes'){
+            steps{
+                script{
+                    sh """
+                        echo "Route Checking"
+                        oc project ${THREE_SCALE_NAMESPACE}
+
+                        set +e
+                        oc get route ${APICAST_STAGING_ROUTE}
+                        OUT=\$?
+                        if [ \$OUT -eq 1 ]; then
+                            echo "Route ${APICAST_STAGING_ROUTE} not found"
+                            oc create route edge --service=${APICAST_STAGING_SERVICE} --hostname=${APICAST_STAGING_ROUTE}.${THREE_SCALE_CLUSTER} --insecure-policy=Allow ${APICAST_STAGING_ROUTE}
+                        fi
+
+                        oc get route ${APICAST_PROD_ROUTE}
+                        OUT=\$?
+                        if [ \$OUT -eq 1 ]; then
+                            echo "Route ${APICAST_PROD_ROUTE} not found"
+                            #oc create route edge --service=${APICAST_PROD_SERVICE} --hostname=${APICAST_PROD_ROUTE}.${THREE_SCALE_CLUSTER} --insecure-policy=Allow ${APICAST_PROD_ROUTE}
+                            oc create route edge --service=${APICAST_PROD_SERVICE} --hostname=${APICAST_PROD_ROUTE} --insecure-policy=Redirect ${APICAST_PROD_ROUTE}
+                        fi
+
+                        oc project ${APPLICATION_NAMESPACE}
+                        set -e
+                    """
+                }
+            }
+        }
+
+        stage('Import OpenAPI'){
+            environment{
+                DOWNSTREAM_SERVICE_URL= sh (returnStdout: true, script: "oc get svc ${UoA_INTEGRATION_APP_VERSIONED_NAME} -n ${APPLICATION_NAMESPACE} -o 'jsonpath={.metadata.name}.{.metadata.namespace}.svc.cluster.local'").trim()
+                THREE_SCALE_ADMIN_SECRET = credentials("${THREE_SCALE_ADMIN_SECRET_NAME}")
+            }
+            steps{
+                script{
+                    def STAGING_PUBLIC_URL="https://${APICAST_STAGING_ROUTE}.${THREE_SCALE_CLUSTER}:443"
+                    def PROD_PUBLIC_URL
+                    def SERVER = AUTH_SERVER
+
+                    RH_SSO_HOST_ONLY = SERVER.minus("https://")
+                    SSO_URL_REALM = "${RH_SSO_HOST_ONLY}${RH_SSO_AUTH_REALM_PATH}"
+
+                    if (env.ENVT != 'dev'){
+                        PROD_PUBLIC_URL="https://${APICAST_PROD_ROUTE}:443"
+                    }else{
+                        PROD_PUBLIC_URL="https://${APICAST_PROD_ROUTE}.${THREE_SCALE_CLUSTER}:443"
+                    }
+
+                    def toolboxArgs = ["3scale","import","openapi","-d", THREE_SCALE_CREDENTIAL,"/src/main/resources/swagger/swagger.json","--oidc-issuer-endpoint=${THREE_SCALE_ADMIN_URL}:${THREE_SCALE_ADMIN_SECRET}@${SSO_URL_REALM}", "--override-private-base-url=http://${DOWNSTREAM_SERVICE_URL}:8080", "--staging-public-base-url=${STAGING_PUBLIC_URL}","--production-public-base-url=${PROD_PUBLIC_URL}","-t", THREE_SCALE_API_SERVICE_SYSTEM_NAME]
+                    def logs = runToolbox(toolboxArgs,TOOLBOX_CONFIG_MAP,TOOLBOX_JOB_NAME)
+
+                    detectToolboxError(logs)
+                }
+            }
+        }
+
+        stage("Create an Application Plan") {
+            steps{
+                script{
+                    def toolboxArgs = [ "3scale", "application-plan", "apply", THREE_SCALE_CREDENTIAL, THREE_SCALE_API_SERVICE_SYSTEM_NAME, "${THREE_SCALE_API_SERVICE_SYSTEM_NAME}-${APP_PLAN_SUFFIX}", "-n", "${THREE_SCALE_API_SERVICE_SYSTEM_NAME}-${APP_PLAN_SUFFIX}" ]
+                    def logs = runToolbox(toolboxArgs,TOOLBOX_CONFIG_MAP,TOOLBOX_JOB_NAME)
+
+                    detectToolboxError(logs)
+
+                }
+            }
+        }
+
+        stage("Create an Application") {
+            steps{
+                script{
+                    def toolboxArgs = [ "3scale", "application", "apply", THREE_SCALE_CREDENTIAL, "${THREE_SCALE_API_SERVICE_SYSTEM_NAME}-${PIPELINE_CLIENT_SUFFIX}", "--account=${DEFAULT_DEVELOPER_ACCT_ID}", "--name=${THREE_SCALE_API_SERVICE_SYSTEM_NAME}-${APP_SUFFIX}", "--description=${THREE_SCALE_API_SERVICE_SYSTEM_NAME}-${APP_SUFFIX} is an application which was automatically created via a pipeline.", "--plan=${THREE_SCALE_API_SERVICE_SYSTEM_NAME}-${APP_PLAN_SUFFIX}", "--service=${THREE_SCALE_API_SERVICE_SYSTEM_NAME}", "--verbose" ]
+                    def logs = runToolbox(toolboxArgs,TOOLBOX_CONFIG_MAP,TOOLBOX_JOB_NAME)
+
+                    detectToolboxError(logs)
+                }
+            }
+        }
+
+    }
+
+    post{
+        success{
+            echo "Pipeline ran successfully."
+            deleteRoute("${UoA_INTEGRATION_APP_VERSIONED_NAME}" , "${APPLICATION_NAMESPACE}")
+        }
+
+        failure{
+            echo "Pipeline failure due to some errors."
+            deleteRoute("${UoA_INTEGRATION_APP_VERSIONED_NAME}" , "${APPLICATION_NAMESPACE}")
+        }
+    }
+}
+
+@NonCPS
+def deleteRoute(String name, String namespace){
+    echo "Initiate cleanup of route."
+    echo "Print variables $name $namespace "
+
+    sh """
+        set +e
+        oc delete route $name -n $namespace
+        set -e
+    """
+}
+
+@NonCPS
+def getProjectName(text) {
+    def matcher = text =~ '[:,\\/]{1}integration/(.*)+?(?=.git)'
+    echo "getProjectName ${matcher[0][1]}"
+    return matcher[0][1]
+}
+
+def getMajorVersion(ver) {
+    def matcher = ver =~ '(\\d+).'
+    return matcher[0][1]
+}
+
+def runToolbox(args,configMap,jobName) {
+    def kubernetesJob = [
+            "apiVersion": "batch/v1",
+            "kind": "Job",
+            "metadata": [
+                    "name": "toolbox"
+            ],
+            "spec": [
+                    "backoffLimit": 0,
+                    "activeDeadlineSeconds": 300,
+                    "template": [
+                            "spec": [
+                                    "restartPolicy": "Never",
+                                    "containers": [
+                                            [
+                                                    "name": "job",
+                                                    "image": "quay.io/redhat/3scale-toolbox:v0.17.1",
+                                                    "imagePullPolicy": "Always",
+                                                    "args": [ "3scale", "version" ],
+                                                    "env": [
+                                                            [ "name": "HOME", "value": "/config" ]
+                                                    ],
+                                                    "volumeMounts": [
+                                                            [ "mountPath": "/config", "name": "toolbox-config" ],
+                                                            [ "mountPath": "/src/main/resources/swagger", "name": "artifacts" ]
+                                                    ]
+                                            ]
+                                    ],
+                                    "volumes": [
+                                            [ "name": "toolbox-config", "secret": [ "secretName": "3scale-toolbox" ] ],
+                                            [ "name": "artifacts", "configMap": [ "name": "openapi" ] ]
+                                    ]
+                            ]
+                    ]
+            ]
+    ]
+
+
+    kubernetesJob.spec.template.spec.containers[0].args = args
+    kubernetesJob.spec.template.spec.volumes[1].configMap.name = configMap
+    kubernetesJob.metadata.name = jobName
+
+    sh "rm -f -- ${jobName}-job.yaml"
+    writeYaml file: "${jobName}-job.yaml", data: kubernetesJob
+    sh """
+        oc delete job ${jobName} --ignore-not-found
+        sleep 5
+        oc create -f ${jobName}-job.yaml
+        #sleep 60 # Adjust the sleep duration to your server velocity
+        
+        set +x
+            while :
+                do
+                    sleep 10
+                    JOB_STATUS=\$(oc get  jobs ${jobName}  -o go-template="{{range .status.conditions}}{{.status}}{{end}}")
+
+                    if [ "\${JOB_STATUS}" = "True" ];then
+                        break
+                    
+                    fi;
+                done
+        set -x
+    """
+
+    def logs = sh(script: "oc logs -f job/${jobName}", returnStdout: true)
+    echo logs
+    return logs
+}
+
+def detectToolboxError(logs){
+    if (logs.toLowerCase().contains("crash log has been written to") || logs.toLowerCase().contains("error")){
+        echo "Detected error in toolbox"
+        error('Aborting the pipeline execution due to toolbox error.')
+    }
+}

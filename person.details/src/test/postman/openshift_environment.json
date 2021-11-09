@@ -1,0 +1,35 @@
+{
+	"name": "environment",
+	"values": [
+		{
+			"key": "HOST",
+			"value": "{{HOST}}",
+			"enabled": true
+		},
+		{
+			"key": "PORT",
+			"value": "{{PORT}}",
+			"enabled": true
+		},
+		{
+			"key": "CLIENT_ID",
+			"value": "{{CLIENT_ID}}",
+			"enabled": true
+		},
+		{
+			"key": "CLIENT_SECRET",
+			"value": "{{CLIENT_SECRET}}",
+			"enabled": true
+		},
+		{
+			"key": "AUTH_URL",
+			"value": "{{AUTH_URL}}",
+			"enabled": true
+		},
+		{
+			"key": "ACCESS_TOKEN",
+			"value": "",
+			"enabled": true
+		}
+	]
+}

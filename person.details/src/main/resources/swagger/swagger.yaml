@@ -1,0 +1,307 @@
+openapi: 3.0.3
+info:
+  title: Student Personal Details (version 1.0)
+  description: |
+    An API for retrive and update student details.
+    This API is purely develop for MyAdelaide and at the development time reusability was out of scope.
+  version: v1
+  termsOfService: https://adelaide.atlassian.net/wiki/spaces/DXP/pages/777912765/Fuse+student+personal+details
+  contact:
+    email: systemintegrationteam@dl.adelaide.edu.au
+  license:
+    name: Apache 2.0
+    url: http://www.apache.org/licenses/LICENSE-2.0.html
+servers:
+  - url: http://api.adelaide.edu.au/{basePath}
+    description: The production API server
+    variables:
+      basePath:
+        default: /api/personal-details/v1
+tags:
+  - name: student
+    description: student api
+    externalDocs:
+      description: Find out more
+      url: https://adelaide.atlassian.net/wiki/spaces/DXP/pages/777912765/Fuse+student+personal+details
+paths:
+  /api/person-details/v1/{employeeId}:
+    get:
+      tags:
+        - address
+      summary: Returns students' effective addresses, that is with the dates from now and in the future.
+      operationId: getPersonDetails
+      security:
+        - student_auth: []
+      parameters:
+        - name: employeeId
+          in: path
+          description: The numerical part of the employee/student id
+          required: true
+          example: '1600002'
+          schema:
+            type: string
+      responses:
+        '200':
+          description: An list of addresses
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ADDRESSES'
+        '400':
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/errorMessage'
+        '401':
+          description: You are not authorized to submit the request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/errorMessage'
+        '403':
+          description: You do not have permission to submit the request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/errorMessage'
+        '404':
+          description: Resource is not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/errorMessage'
+        '405':
+          description: Method Not Allowed
+        '406':
+          description: Not Acceptable
+        '500':
+          description: Unable to process the request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/errorMessage'
+
+
+
+components:
+  securitySchemes:
+    student_auth:
+      type: http
+      description: 'Expects the header: "Authorization: Bearer &lt;JWT token&gt;"'
+      scheme: bearer
+  schemas:
+    ADDRESSES:
+      type: object
+      properties:
+        ADDRESSES:
+          type: array
+          items:
+            $ref: '#/components/schemas/ADDRESS'
+          minItems: 1
+    ADDRESS:
+      type: object
+      properties:
+        EMPLID:
+          type: string
+          example: '1234567'
+        ADDRESS_TYPE:
+          $ref: '#/components/schemas/addressTypeEnum'
+        EFFDT:
+          type: string
+          format: date
+          pattern: yyyy-mm-dd
+          example: '2019-04-12'
+        EFF_STATUS:
+          type: string
+          readOnly: true
+        COUNTRY:
+          type: string
+          example: AUS
+        ADDRESS1:
+          type: string
+          example: Rundle Mall Plaza
+        ADDRESS2:
+          type: string
+          example: 50 Rundle Mall
+        ADDRESS3:
+          type: string
+        ADDRESS4:
+          type: string
+        CITY:
+          type: string
+          example: Adelaide
+        STATE:
+          type: string
+          example: SA
+        POSTAL:
+          type: string
+          example: '5000'
+        COUNTRY_DESCR:
+          type: string
+          example: South Australia
+          readOnly: true
+        STATE_DESCR:
+          type: string
+          example: SA
+          readOnly: true
+      required:
+        - EMPLID
+        - EFFDT
+        - ADDRESS_TYPE
+    addressTypeEnum:
+      type: string
+      enum:
+        - CHK
+        - HOME
+        - MAIL
+        - OTH2
+        - PRAC
+        - BILL
+        - BUSN
+        - CAMP
+    PHONE:
+      type: object
+      properties:
+        EMPLID:
+          type: string
+          example: '1234567'
+        PHONE_TYPE:
+          type: string
+          example: CELL
+        COUNTRY_CODE:
+          type: string
+          example: AUS
+        PHONE:
+          type: string
+          example: '67676767'
+        EXTENSION:
+          type: string
+          example: 3344
+      required:
+        - EMPLID
+        - PHONE_TYPE
+        - PHONE
+    PHONES:
+      type: object
+      properties:
+        PHONES:
+          type: array
+          items:
+            $ref: '#/components/schemas/PHONE'
+          minItems: 1
+    EMAILADDRESS:
+      type: object
+      properties:
+        EMPLID:
+          type: string
+          example: '1234567'
+        E_ADDR_TYPE:
+          type: string
+          example: CAMP
+        EMAIL_ADDR:
+          type: string
+          example: aaa.bbb@adelaide.edu.au
+        PREF_EMAIL_FLAG:
+          type: string
+          example: 'Y'
+      required:
+        - EMPLID
+        - EMAIL_ADDR
+        - E_ADDR_TYPE
+    EMAILADDRESSES:
+      type: object
+      properties:
+        EMAILADDRESSES:
+          type: array
+          items:
+            $ref: '#/components/schemas/EMAILADDRESS'
+          minItems: 1
+    EMERGENCYPHONE:
+      type: object
+      properties:
+        EMPLID:
+          type: string
+          example: '1234567'
+        CONTACT_NAME:
+          type: string
+          example: Aaaa Bbbb
+        PHONE_TYPE:
+          type: string
+          example: CELL
+        PHONE:
+          type: string
+          example: '67676767'
+      required:
+        - EMPLID
+        - PHONE_TYPE
+        - PHONE
+        - CONTACT_NAME
+    EMERGENCYPHONES:
+      type: object
+      properties:
+        EMERGENCYPHONES:
+          type: array
+          items:
+            $ref: '#/components/schemas/EMERGENCYPHONE'
+          minItems: 1
+    EMERGENCYCONTACT:
+      type: object
+      properties:
+        EMPLID:
+          type: string
+          example: '1234567'
+        RELATIONSHIP:
+          type: string
+          example: SP
+        PRIMARY_CONTACT:
+          type: string
+          example: CELL
+        ADDRESS1:
+          type: string
+          example: Rundle Mall Plaza
+        ADDRESS2:
+          type: string
+          example: 50 Rundle Mall
+        ADDRESS3:
+          type: string
+          example: ''
+        CITY:
+          type: string
+          example: Adelaide
+        STATE:
+          type: string
+          example: SA
+        POSTAL:
+          type: string
+          example: '5000'
+        COUNTRY:
+          type: string
+          example: AUS
+        COUNTRY_DESCR:
+          type: string
+          example: South Australia
+        PHONE:
+          type: string
+          example: '67676767'
+      required:
+        - EMPLID
+        - RELATIONSHIP
+        - PRIMARY_CONTACT
+    EMERGENCYCONTACTS:
+      type: object
+      properties:
+        EMERGENCYCONTACTS:
+          type: array
+          items:
+            $ref: '#/components/schemas/EMERGENCYCONTACT'
+          minItems: 1
+    errorMessage:
+      type: object
+      properties:
+        error:
+          type: string
+        errorDetails:
+          type: array
+          items:
+            type: string

@@ -1,0 +1,8 @@
+APPLICATION_GIT_BRANCH=feature/IN-1326-add-prometheus-to-person-details
+APPLICATION_GIT_URI=git@gitlab.adelaide.edu.au:integration/person.details.git
+APPLICATION_NAMESPACE=integration-dev
+JENKINS_SOURCE_SECRET=jenkins-ci-ssh-auth
+JENKINS_FILE=Jenkinsfile
+JENKINS_NAMESPACE=integration-jenkins
+ENVT=dev
+

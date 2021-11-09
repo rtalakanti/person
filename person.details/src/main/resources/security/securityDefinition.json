@@ -1,0 +1,9 @@
+{
+  "oauth": {
+    "type": "oauth2",
+    "tokenUrl": "https://sso-3scale-ha.openshift.development.adelaide.edu.au/auth/realms/uoarealm/protocol/openid-connect/token",
+    "flow": "application",
+    "scopes": {}
+  }
+}
+

@@ -1,0 +1,87 @@
+apiVersion: v1
+kind: Template
+labels:
+  template: uoa-integration-buildconfig-pipeline-template
+metadata:
+  name: uoa-integration-buildconfig-pipeline-template
+  annotations:
+    description: UoA Integration Build Config Template for Pipeline Job
+    iconClass: icon-jboss
+    tags: uoa
+    version: "1.0"
+  creationTimestamp: null
+
+objects:
+- apiVersion: v1
+  kind: BuildConfig
+  metadata:
+    labels:
+      app: ${UoA_INTEGRATION_APP_UNIQUE_NAME}
+    name: ${UoA_INTEGRATION_APP_UNIQUE_NAME}-${VERSION}-${ENVT}-pipeline
+  spec:
+    source:
+      git:
+        ref: ${APPLICATION_GIT_BRANCH}
+        uri: ${APPLICATION_GIT_URI}
+      sourceSecret:
+        name: ${JENKINS_SOURCE_SECRET}
+    strategy:
+      jenkinsPipelineStrategy:
+        env:
+        - name: APPLICATION_GIT_URI
+          value: ${APPLICATION_GIT_URI}
+        - name: APPLICATION_GIT_BRANCH
+          value: ${APPLICATION_GIT_BRANCH}
+        - name: APPLICATION_NAMESPACE
+          value: ${APPLICATION_NAMESPACE}
+        - name: JENKINS_SOURCE_SECRET
+          value: ${JENKINS_SOURCE_SECRET}
+        - name: JENKINS_NAMESPACE
+          value: ${JENKINS_NAMESPACE}
+        - name: ENVT
+          value: ${ENVT}
+        jenkinsfilePath: ${JENKINS_FILE}
+      type: JenkinsPipeline
+    triggers:
+    - gitlab:
+        secret: ${GITLAB_WEBHOOK_SECRET}
+      type: GitLab
+parameters:
+- name: UoA_INTEGRATION_APP_UNIQUE_NAME
+  displayName: UoA Integration App unique name
+  description: The unique name assigned to the service.
+  required: true
+- name: APPLICATION_GIT_BRANCH
+  displayName: The Git Branch
+  description: The branch that contains the Jenkinsfile.
+  required: true
+- name: APPLICATION_GIT_URI
+  displayName: The Git URI
+  description: The Git URI used for this application.
+- name: APPLICATION_NAMESPACE
+  displayName: Namespace
+  description: The Namespace where the project will be deployed.
+  required: true
+- name: JENKINS_SOURCE_SECRET
+  displayName: Jenkins Source Secret
+  description: The Jenkins Source secret used for checking out projects from GitLab.
+  required: true
+- name: JENKINS_FILE
+  displayName: Jenkinsfile
+  description: The name of the Jenkinsfile for this build configuration.
+  required: true
+- name: JENKINS_NAMESPACE
+  displayName: Jenkinsfile Namespace
+  description: The name of the namesapce where Jenkins runs.
+  required: true
+- name: GITLAB_WEBHOOK_SECRET
+  description: A secret string used to configure the GitLab webhook
+  generate: expression
+  from: "[a-zA-Z0-9]{10}"
+- name: VERSION
+  displayName: Version
+  description: Version of the pipeline.
+  required: true
+- name: ENVT
+  displayName: Deploy Environment
+  description: Environment to deploy the application to.
